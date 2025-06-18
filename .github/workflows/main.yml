@@ -1,4 +1,4 @@
-name: ShirokoNekoKernel Mt6897编译项目
+name: ShirokoNeko-SYSTEM一加Pad官改定制Kernel
 env:
   TZ: Asia/Shanghai
   CPU: 'MT6897'
