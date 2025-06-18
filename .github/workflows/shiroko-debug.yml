@@ -1,0 +1,264 @@
+name: KernelSU-Next 构建 (MTK平台)
+on:
+  workflow_dispatch:
+    inputs:
+      CPU:
+        type: choice
+        description: "芯片平台分支"
+        required: true
+        default: mt6897
+        options:
+          - mt6897
+      FEIL:
+        type: choice
+        description: "设备配置文件"
+        required: true
+        default: oppopad3
+        options:
+          - oppopad3
+      CPUD:
+        type: choice
+        description: "处理器代号"
+        required: true
+        default: mt6897
+        options:
+          - mt6897
+      ANDROID_VERSION:
+        type: choice
+        description: "Android系统版本"
+        required: true
+        default: android14
+        options:
+          - android14
+          - android15
+      KERNEL_VERSION:
+       type: choice
+       description: "Linux内核版本"
+       required: true
+       default: "6.1"
+       options:
+         - "6.1"
+      BUILD_METHOD:
+        type: choice
+        description: "编译模式"
+        required: true
+        default: perf
+        options:
+          - gki
+          - perf
+      SUFFIX:
+        type: string
+        description: "自定义内核版本后缀 (留空使用随机生成)"
+        required: false
+        default: "ShirokoNekoSystem_Customization-OPad_XinRan"
+      VFS:
+        type: boolean
+        description: "启用VFS手动钩子功能"
+        required: true
+        default: true
+      ZRAM:
+        type: boolean
+        description: "启用扩展ZRAM压缩算法"
+        required: true
+        default: true
+      FAST:
+        type: boolean
+        description: "启用快速编译模式 (仅生成Image)"
+        required: true
+        default: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_DIR: /home/runner/.ccache  
+      CCACHE_MAXSIZE: 8G
+    steps:
+      - name: 最大化构建空间
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: 配置Git
+        run: |
+          git config --global user.name "Winkmoon"
+          git config --global user.email "3432632982@qq.com"
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt update
+          sudo apt install -y python3 git curl clang cmake make llvm wget
+          sudo apt-get install curl bison flex make binutils dwarves git lld pahole zip perl gcc python3 python-is-python3 bc libssl-dev libelf-dev clang wget cmake ccache -y
+          
+      - name: 安装LLVM工具链
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          sudo chmod +x llvm.sh
+          sudo ./llvm.sh 20 all   
+
+      - name: 配置Rust工具链
+        run: |
+          rustup default nightly
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+          rustup component add rust-src llvm-tools-preview
+          rustup update
+
+      - name: 恢复ccache缓存
+        uses: actions/cache@v3
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ runner.os }}-${{ github.ref }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+                        
+      - name: 显示输入参数
+        run: |
+          echo "芯片平台: ${{ github.event.inputs.CPU }}"
+          echo "设备配置: ${{ github.event.inputs.FEIL }}"
+          echo "处理器代号: ${{ github.event.inputs.CPUD }}"
+          echo "Android版本: ${{ github.event.inputs.ANDROID_VERSION }}"
+          echo "内核版本: ${{ github.event.inputs.KERNEL_VERSION }}"
+          echo "编译模式: ${{ github.event.inputs.BUILD_METHOD }}"
+          echo "自定义后缀: ${{ github.event.inputs.SUFFIX }}"
+          echo "启用VFS: ${{ github.event.inputs.VFS }}"
+          echo "启用ZRAM扩展: ${{ github.event.inputs.ZRAM }}"
+          echo "快速编译模式: ${{ github.event.inputs.FAST }}"
+
+      - name: 获取内核源码
+        run: |
+          mkdir kernel_workspace && cd kernel_workspace
+          git clone --depth=1 https://github.com/oppo-source/android_kernel_oppo_mt6897 -b oppo/mt6897_v_15.0.0_oppopad3 kernel
+          cd kernel
+          echo "内核源码获取完成"
+
+      - name: 清理版本标识
+        run: |
+          cd kernel_workspace/kernel
+          sed -i 's/ -dirty//g' scripts/setlocalversion || true
+          sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' scripts/setlocalversion
+
+      - name: 设置自定义版本后缀
+        if: ${{ github.event.inputs.SUFFIX != '' }}
+        run: |
+          cd kernel_workspace/kernel
+          sed -i '/^res=/a res=$(echo "$res" | sed -E '\''s/-[0-9]+-o-g[0-9a-f]{7,}//'\'')' scripts/setlocalversion
+          sed -i "\$s|echo \"\\\$res\"|echo \"\$res-${{ github.event.inputs.SUFFIX }}\"|" scripts/setlocalversion
+
+      - name: 生成随机版本后缀
+        if: ${{ github.event.inputs.SUFFIX == '' }}
+        run: |
+          cd kernel_workspace/kernel
+          RANDOM_DIGIT=$(od -An -N1 -tu1 < /dev/urandom | tr -d '[:space:]' | awk '{print $1 % 11}')
+          RANDOM_HASH=$(od -An -N7 -tx1 /dev/urandom | tr -d ' \n')
+          RANDOM_SUFFIX="${RANDOM_DIGIT}-o-g${RANDOM_HASH}"
+          sed -i '/^res=/a res=$(echo "$res" | sed -E '\''s/-[0-9]+-o-g[0-9a-fA-F]{7,}//g'\'')' scripts/setlocalversion || true
+          sed -i "\$s|echo \"\\\$res\"|echo \"\$res-$RANDOM_SUFFIX\"|" scripts/setlocalversion || true
+
+      - name: 集成KernelSU-Next
+        run: |
+          cd kernel_workspace/kernel
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          cd ./KernelSU*
+          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 10606)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          export KSU_VERSION=$KSU_VERSION
+
+      - name: 应用KernelSU补丁
+        run: |
+          cd kernel_workspace          
+          git clone https://github.com/SukiSU-Ultra/SukiSU_patch.git
+          cd kernel
+          
+      - name: 应用隐藏功能补丁
+        run: |
+          cd kernel_workspace/kernel
+          cp ../SukiSU_patch/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: 应用VFS钩子补丁
+        run: |
+          cd kernel_workspace/kernel
+          if [ "${{ github.event.inputs.VFS }}" = "true" ]; then
+            cp ../SukiSU_patch/hooks/syscall_hooks.patch ./
+            patch -p1 -F 3 < syscall_hooks.patch
+          fi
+
+      - name: 配置内核选项
+        run: |
+          cd kernel_workspace/kernel
+          CONFIG_FILE=arch/arm64/configs/oppo6897_defconfig
+
+          # KernelSU配置
+          echo "CONFIG_KSU=y" >> "$CONFIG_FILE"
+          echo "CONFIG_OVERLAY_FS=y" >> "$CONFIG_FILE"  
+          echo "CONFIG_KPROBES=y" >> "$CONFIG_FILE"  
+          echo "CONFIG_KSU_WITH_KPROBES=y" >> "$CONFIG_FILE"
+
+          # ZRAM扩展配置
+          if [ "${{ github.event.inputs.ZRAM }}" = "true" ]; then
+            echo "CONFIG_ZRAM_DEF_COMP=\"zstd\"" >> "$CONFIG_FILE"
+            echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> "$CONFIG_FILE"
+            echo "CONFIG_CRYPTO_ZSTD=y" >> "$CONFIG_FILE"
+            echo "CONFIG_ZRAM_MULTI_COMP=y" >> "$CONFIG_FILE"
+          fi
+
+      - name: 编译内核
+        run: |
+          cd kernel_workspace/kernel
+          export PATH="/usr/lib/ccache:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export DTC_EXT=dtc
+          
+          # 设置编译目标
+          if [ "${{ github.event.inputs.FAST }}" = "true" ]; then
+            BUILD_TARGET="Image"
+          else
+            BUILD_TARGET="all"
+          fi
+
+          # 配置编译环境
+          make O=out oppo6897_defconfig
+          
+          # 执行编译
+          make -j$(nproc --all) O=out \
+            CC="clang" \
+            LD="ld.lld" \
+            AR="llvm-ar" \
+            NM="llvm-nm" \
+            OBJCOPY="llvm-objcopy" \
+            OBJDUMP="llvm-objdump" \
+            STRIP="llvm-strip" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            $BUILD_TARGET
+
+          # 整理编译输出
+          mkdir -p ../dist
+          cp out/arch/arm64/boot/Image ../dist/Image
+          echo "内核编译完成"
+
+      - name: 准备AnyKernel3刷机包
+        run: |
+          git clone https://github.com/Numbersf/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          cp kernel_workspace/dist/Image ./AnyKernel3/Image
+
+      - name: 生成刷机包后缀
+        id: suffix
+        run: |
+          echo "value=${{ github.event.inputs.VFS == 'true' && '_VFS' || '' }}${{ github.event.inputs.ZRAM == 'true' && '_ZSTD' || '' }}" >> $GITHUB_OUTPUT
+
+      - name: 上传刷机包
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_OPPOPad3_${{ env.KSUVER }}_MT6897${{ steps.suffix.outputs.value }}
+          path: ./AnyKernel3/*
