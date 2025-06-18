@@ -283,11 +283,11 @@ jobs:
             cp -r ./sched_ext/* ./common/kernel/sched
           fi
           cd common
-          # sed -i '/oplus/d' Kconfig.ext
-          # sed -i '/oplus/d' drivers/soc/Kconfig
-          # wget https://github.com/huifanghf/android_kernel_modules_oneplus_mt6895/raw/15/oplus/kernel/mm/mm_osvelte/mm-trace.h
-          # rm -rf mm/mm-trace.h || echo "不需要删除"
-          # cp -f mm-trace.h mm/
+          sed -i '/oplus/d' Kconfig.ext
+          sed -i '/oplus/d' drivers/soc/Kconfig
+          wget https://github.com/huifanghf/android_kernel_modules_oneplus_mt6895/raw/15/oplus/kernel/mm/mm_osvelte/mm-trace.h
+          rm -rf mm/mm-trace.h || echo "不需要删除"
+          cp -f mm-trace.h mm/
           export LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0
           make -j$(nproc --all) LLVM=-20 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnuabeihf- CC=clang LD=ld.lld HOSTCC=clang HOSTLD=ld.lld O=out KCFLAGS+=-Wno-error gki_defconfig all
           echo "内核编译完成！"
