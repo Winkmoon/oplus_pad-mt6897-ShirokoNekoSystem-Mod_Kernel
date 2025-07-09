@@ -100,7 +100,7 @@ jobs:
         run: |
           rm -rf kernel_workspace && mkdir kernel_workspace && cd kernel_workspace
           echo "正在克隆源码仓库..."
-          git clone --depth=1 https://github.com/oppo-source/android_kernel_oppo_mt6897.git common -b oppo/mt6897_v_15.0.2_oppo_reno_14
+          git clone --depth=1 https://github.com/Winkmoon/android_kernel_oppo_mt6897.git common -b oppo/mt6897_v_15.0.2_oppo_reno_14
          
           # git clone --depth=1 https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm8650 -b oneplus/"${{ github.event.inputs.basebranch }}" common
           git clone https://github.com/Carl1984/oppo_oplus_realme_sm8650.git
